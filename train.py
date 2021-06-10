@@ -14,6 +14,29 @@ sys.path.append(os.path.join(ROOT_DIR, 'utils'))
 import provider
 from model import *
 
+#将分类序号对应到原始数据的标记序号
+#实际只有17个类
+CLASS_MAP = {0:0,1:0,2:0,3:0,
+             4:1,
+             5:2,
+             6:3,
+             7:4,
+             8:5,
+             9:6,
+             10:7,
+             11:8,
+             12:9,
+             13:10,
+             14:11,
+             15:12,
+             16:13,
+             17:14,18:0,19:0,20:0,
+             21:15,
+             22:16}
+
+class_map = lambda t:CLASS_MAP[t]
+np_class_map = np.vectorize(class_map)
+
 # 基本环境配置
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu', type=int, default=0, help='GPU to use [default: GPU 0]')
@@ -24,7 +47,7 @@ parser.add_argument('--batch_size', type=int, default=1, help='Batch Size during
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Initial learning rate [default: 0.001]')
 parser.add_argument('--momentum', type=float, default=0.9, help='Initial learning rate [default: 0.9]')
 parser.add_argument('--optimizer', default='adam', help='adam or momentum [default: adam]')
-parser.add_argument('--decay_step', type=int, default=300000, help='Decay step for lr decay [default: 300000]')
+parser.add_argument('--decay_step', type=int, default=30000, help='Decay step for lr decay [default: 30000]')
 parser.add_argument('--decay_rate', type=float, default=0.5, help='Decay rate for lr decay [default: 0.5]')
 parser.add_argument('--test_area', type=int, default=6, help='Which area to use for test, option: 1-6 [default: 6]')
 FLAGS = parser.parse_args()
@@ -49,7 +72,7 @@ LOG_FOUT.write(str(FLAGS) + '\n')
 
 #基本参数
 MAX_NUM_POINT = 65536
-NUM_CLASSES = 23
+NUM_CLASSES = 17
 
 BN_INIT_DECAY = 0.5
 BN_DECAY_DECAY_RATE = 0.5
@@ -60,7 +83,7 @@ BN_DECAY_CLIP = 0.99
 HOSTNAME = socket.gethostname()
 
 #dataset路径 对应要做修改
-dataset_path = '/home/CORP.PKUSC.ORG/pkuyyj/PointCNN.Pytorch/data/data_poss'
+dataset_path = '../dataset/'
 
 #注意第一次运行的时候要init
 provider.init_dataset(dataset_path)
@@ -68,7 +91,7 @@ provider.init_dataset(dataset_path)
 data_batch_list = []
 label_batch_list = []
 #训练时用前五个sequences
-for i in range(5):
+for i in range(1):
     data_,label_ = provider.load_one_sequence(dataset_path,i)
     data_batch_list.append(data_)
     label_batch_list.append(label_)
@@ -78,7 +101,7 @@ label_batches = np.concatenate(label_batch_list, 0)
 
 print(data_batches.shape)
 print(label_batches.shape)
-
+'''
 #此处做训练集与测试集划分 用最简单的随机方法 可以在后续做修改 划分比例为5:1
 data_index = np.arange(data_batches.shape[0])
 np.random.shuffle(data_index)
@@ -89,13 +112,47 @@ test_idxs = data_index[train_size:]
 
 # 划分测试集与训练集
 train_data = data_batches[train_idxs, ...]
-train_label = label_batches[train_idxs]
+train_label = np_class_map(label_batches[train_idxs])
 test_data = data_batches[test_idxs, ...]
-test_label = label_batches[test_idxs]
+test_label = np_class_map(label_batches[test_idxs])
+print(train_data.shape, train_label.shape)
+print(test_data.shape, test_label.shape)
+'''
+
+
+#减小测试集和训练集 用于测试
+train_data = data_batches[0:5]
+train_label = np_class_map(label_batches[0:5])
+test_data = data_batches[10:12]
+test_label = np_class_map(label_batches[10:12])
 print(train_data.shape, train_label.shape)
 print(test_data.shape, test_label.shape)
 
+train_shape_0 = train_data.shape[0]
+train_shape_1 = train_data.shape[1]
+test_shape_0 = test_data.shape[0]
+test_shape_1 = test_data.shape[1]
+train_random_shape_1 = np.arange(train_shape_1)
+test_random_shape_1 = np.arange(test_shape_1)
 
+# #每个图分别Shuffle 即点的排布都不相同
+# for i in range(train_shape_0):
+#     np.random.shuffle(train_random_shape_1)
+#     train_data[i] = train_data[i,train_random_shape_1]
+#     train_label[i] = train_label[i,train_random_shape_1]
+#     np.random.shuffle(test_random_shape_1)
+#     test_data[i] = test_data[i,test_random_shape_1]
+#     test_label[i] = test_label[i,test_random_shape_1]
+'''
+#所有图的点一起shuffle，点的排布相同 但无序
+np.random.shuffle(train_random_shape_1)
+train_data[:] = train_data[:,train_random_shape_1]
+train_label[:] = train_label[:,train_random_shape_1]
+np.random.shuffle(test_random_shape_1)
+test_data[:] = test_data[:,test_random_shape_1]
+test_label[:] = test_label[:,test_random_shape_1]
+'''
+print("shuffle end")
 # 写记录的函数的
 def log_string(out_str):
     LOG_FOUT.write(out_str + '\n')
@@ -272,11 +329,20 @@ def eval_one_epoch(sess, ops, test_writer):
         feed_dict = {ops['pointclouds_pl']: current_data[start_idx:end_idx, :, :],
                      ops['labels_pl']: current_label[start_idx:end_idx],
                      ops['is_training_pl']: is_training}
-        summary, step, loss_val, pred_val = sess.run([ops['merged'], ops['step'], ops['loss'], ops['pred']],
+        summary, step, loss_val, pred_value = sess.run([ops['merged'], ops['step'], ops['loss'], ops['pred']],
                                                      feed_dict=feed_dict)
         test_writer.add_summary(summary, step)
-        pred_val = np.argmax(pred_val, 2)
+        pred_val = np.argmax(pred_value, 2)
         correct = np.sum(pred_val == current_label[start_idx:end_idx])
+
+        #测试用
+        print("pred_value.shape:",pred_value.shape)
+        print(pred_value[:10,:])
+        print(pred_val[:100])
+        print(pred_val.shape)
+        print(current_label[start_idx:end_idx,:100])
+        print(current_label[start_idx:end_idx].shape)
+
         total_correct += correct
         total_seen += (BATCH_SIZE * NUM_POINT)
         loss_sum += (loss_val * BATCH_SIZE)
