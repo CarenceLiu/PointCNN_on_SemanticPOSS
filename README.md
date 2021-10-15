@@ -1,1 +1,2 @@
 # PointCNN_on_SemanticPOSS
+该部分将PointCNN论文中代码应用于北大SemanticPOSS数据集，训练并对测试结果可视化
